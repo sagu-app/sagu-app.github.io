@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Sagu | 保存投稿検索</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f2f5fa;color:#14213d;margin:0}
+    main{max-width:760px;margin:auto;padding:26px 16px 48px}
+    h1{color:#315ed4;margin:0}h2{font-size:1.18rem;margin-top:0}
+    header{margin:12px 0 24px}small,.muted{color:#697993}
+    .card{background:#fff;padding:20px;margin:14px 0;border-radius:17px;box-shadow:0 2px 12px #14213d08}
+    input,textarea,button{font:inherit}
+    input[type=search],input[type=url],input[type=text],textarea{width:100%;padding:13px;border:1px solid #cad5e8;border-radius:10px;margin:8px 0;font-size:16px}
+    button,.link{background:#e8efff;color:#274da1;border:0;border-radius:9px;padding:11px 14px;font-weight:650;text-decoration:none;display:inline-block;cursor:pointer}
+    button:hover,.link:hover{filter:brightness(.97)}.primary{background:#315ed4;color:#fff}
+    .result{border-bottom:1px solid #e7ebf3;padding:16px 0}.result:last-child{border:0}
+    .result h3{margin:6px 0;overflow-wrap:anywhere}.preview{white-space:pre-wrap;overflow-wrap:anywhere;color:#596781;line-height:1.55;max-height:9em;overflow:hidden}
+    .row{display:flex;gap:8px;flex-wrap:wrap}.meta{font-size:.8em;color:#7182a0}
+    #status{color:#2856ae;overflow-wrap:anywhere;min-height:1.5em}.error{color:#a02828!important}
+    summary{cursor:pointer;font-weight:650}code{background:#f3f5f8;padding:.1em .3em;border-radius:4px}
+    a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #315ed4;outline-offset:2px}
+  </style>
+</head>
+<body>
+<main>
+  <header><h1>🔖 Sagu</h1><small>あの保存、どこだっけ？　AI不要・端末内検索</small></header>
+
+  <section class="card">
+    <input type="search" id="search" placeholder="沖縄、筋トレ、バッグ…" aria-label="保存投稿を検索">
+    <p id="count" class="muted">0件</p><div id="results"></div>
+  </section>
+
+  <section class="card">
+    <h2>過去の保存投稿を取り込む</h2>
+    <p class="muted">Instagramから取得した <code>saved_posts.json</code> を選択してください。ファイルは端末内だけで処理され、GitHubや外部サービスには送信されません。</p>
+    <input id="file" type="file" accept=".json,application/json">
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="card"><details><summary>＋ 新しい投稿を追加</summary>
+    <input id="url" type="url" placeholder="Instagramの投稿URL" aria-label="Instagramの投稿URL">
+    <input id="title" type="text" placeholder="タイトル" aria-label="タイトル">
+    <textarea id="memo" placeholder="検索用メモ・タグ" aria-label="検索用メモ・タグ"></textarea>
+    <button id="add" class="primary" type="button">保存する</button>
+  </details></section>
+
+  <section class="card">
+    <div class="row"><button id="backup" type="button">データをバックアップ</button><button id="repair" type="button">保存済みデータを再修復</button></div>
+    <p class="muted">データはこの端末・ブラウザ内に保存されます。ブラウザの履歴やWebサイトデータを消すと失われる場合があるため、定期的にバックアップしてください。</p>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+/* SAGU_CORE_START: この範囲はブラウザと自動テストで共用 */
+const SaguCore=(()=>{
+  const decoder=new TextDecoder('utf-8',{fatal:true});
+  const cp1252Reverse=new Map([
+    [0x20ac,0x80],[0x201a,0x82],[0x0192,0x83],[0x201e,0x84],[0x2026,0x85],
+    [0x2020,0x86],[0x2021,0x87],[0x02c6,0x88],[0x2030,0x89],[0x0160,0x8a],
+    [0x2039,0x8b],[0x0152,0x8c],[0x017d,0x8e],[0x2018,0x91],[0x2019,0x92],
+    [0x201c,0x93],[0x201d,0x94],[0x2022,0x95],[0x2013,0x96],[0x2014,0x97],
+    [0x02dc,0x98],[0x2122,0x99],[0x0161,0x9a],[0x203a,0x9b],[0x0153,0x9c],
+    [0x017e,0x9e],[0x0178,0x9f]
+  ]);
+  const mojibakeHint=/[\u0080-\u009f\u00c2\u00c3\u00e2-\u00f0\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc\u2013-\u2026\u2030\u2039\u203a\u20ac\u2122]/u;
+
+  function legacyByte(ch){
+    const cp=ch.codePointAt(0);
+    if(cp<=0xff)return cp;
+    return cp1252Reverse.has(cp)?cp1252Reverse.get(cp):null;
+  }
+
+  function quality(text){
+    let score=0;
+    for(const ch of text){
+      const cp=ch.codePointAt(0);
+      if(cp===0xfffd)score-=500;
+      else if(cp>=0x80&&cp<=0x9f)score-=35;
+      else if((cp>=0x3040&&cp<=0x30ff)||(cp>=0x3400&&cp<=0x9fff))score+=8;
+      else if(cp>0xffff)score+=2;
+      else if(cp===0x00c2||cp===0x00c3||(cp>=0x00e2&&cp<=0x00f0))score-=5;
+    }
+    const suspicious=(text.match(/[ÃÂâãäåæçèéïð][\u0080-\u00ff\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc\u2013-\u2026\u2030\u2039\u203a\u20ac\u2122]/gu)||[]).length;
+    return score-suspicious*16;
+  }
+
+  function decodeRun(run){
+    if(!mojibakeHint.test(run))return run;
+    const bytes=[];
+    for(const ch of run){const b=legacyByte(ch);if(b===null)return run;bytes.push(b)}
+    try{
+      const candidate=decoder.decode(Uint8Array.from(bytes));
+      return quality(candidate)>quality(run)?candidate:run;
+    }catch{return run}
+  }
+
+  function decodeMappableRuns(text){
+    let result='',run='';
+    const flush=()=>{if(run){result+=decodeRun(run);run=''}};
+    for(const ch of text){
+      if(legacyByte(ch)!==null)run+=ch;
+      else{flush();result+=ch}
+    }
+    flush();return result;
+  }
+
+  function repairText(value){
+    if(typeof value!=='string'||!mojibakeHint.test(value))return typeof value==='string'?value:'';
+    let current=value;
+    for(let pass=0;pass<4;pass++){
+      const next=decodeMappableRuns(current);
+      if(next===current||quality(next)<=quality(current))break;
+      current=next;
+    }
+    return current;
+  }
+
+  function normalizeUrl(value){
+    try{
+      const u=new URL(value);
+      if(!['instagram.com','www.instagram.com'].includes(u.hostname.toLowerCase()))return '';
+      const match=u.pathname.match(/^\/(p|reel|tv)\/([a-zA-Z0-9_-]+)/);
+      return match?`https://www.instagram.com/${match[1]}/${match[2]}/`:'';
+    }catch{return ''}
+  }
+
+  function repairPost(raw){
+    const source=raw&&typeof raw==='object'?raw:{};
+    return {
+      url:normalizeUrl(String(source.url||'')),
+      title:repairText(String(source.title||''))||'保存した投稿',
+      caption:repairText(String(source.caption||'')),
+      memo:repairText(String(source.memo||'')),
+      date:Number.isFinite(Number(source.date))?Number(source.date):0
+    };
+  }
+
+  function fromInstagram(data){
+    if(!Array.isArray(data))throw Error('Instagramの saved_posts.json 形式ではありません');
+    if(data.some(entry=>entry&&typeof entry==='object'&&typeof entry.url==='string')){
+      return data.map(repairPost).filter(post=>post.url);
+    }
+    const out=[];
+    for(const entry of data){
+      const values=Array.isArray(entry?.label_values)?entry.label_values:[];
+      const fields=new Map();
+      for(const field of values){
+        if(!field||typeof field!=='object'||typeof field.label!=='string')continue;
+        fields.set(repairText(field.label),field);
+      }
+      const link=fields.get('URL');
+      const url=normalizeUrl(link?.href||link?.value||'');
+      if(!url)continue;
+      const caption=repairText(String(fields.get('キャプション')?.value||''));
+      const suppliedTitle=repairText(String(fields.get('タイトル')?.value||'')).trim();
+      const firstLine=caption.split(/\r?\n/).map(s=>s.trim()).find(Boolean)||'';
+      const title=(suppliedTitle||firstLine||'保存した投稿').slice(0,150);
+      out.push({url,title,caption,memo:'',date:Number(entry?.timestamp||0)});
+    }
+    return out;
+  }
+
+  return {repairText,normalizeUrl,repairPost,fromInstagram};
+})();
+/* SAGU_CORE_END */
+
+const STORAGE_KEY='sagu_data_v1';
+const $=id=>document.getElementById(id);
+let posts=[];
+
+function setStatus(message,isError=false){$('status').textContent=message;$('status').classList.toggle('error',isError)}
+function persist(){
+  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(posts));return true}
+  catch{setStatus('データを保存できませんでした。ブラウザの保存容量や設定を確認してください。',true);return false}
+}
+function dedupe(list){
+  const byUrl=new Map();
+  for(const raw of list){
+    const post=SaguCore.repairPost(raw);if(!post.url)continue;
+    const previous=byUrl.get(post.url);
+    if(!previous)byUrl.set(post.url,post);
+    else byUrl.set(post.url,{...previous,title:previous.title==='保存した投稿'?post.title:previous.title,caption:previous.caption||post.caption,memo:previous.memo||post.memo,date:Math.max(previous.date,post.date)});
+  }
+  return [...byUrl.values()].sort((a,b)=>b.date-a.date);
+}
+function merge(list){
+  const oldByUrl=new Map(posts.map(p=>[p.url,p]));let added=0,updated=0;
+  for(const raw of list){
+    const post=SaguCore.repairPost(raw);if(!post.url)continue;
+    const old=oldByUrl.get(post.url);
+    if(!old){posts.push(post);oldByUrl.set(post.url,post);added++;continue}
+    const merged={...old,title:old.title==='保存した投稿'?post.title:old.title,caption:old.caption||post.caption,memo:old.memo||post.memo,date:Math.max(old.date,post.date)};
+    if(JSON.stringify(merged)!==JSON.stringify(old)){Object.assign(old,merged);updated++}
+  }
+  posts=dedupe(posts);persist();render();return {added,updated};
+}
+function render(){
+  const terms=$('search').value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+  const found=posts.filter(p=>{const text=[p.title,p.caption,p.memo,p.url].join(' ').toLocaleLowerCase();return terms.every(term=>text.includes(term))});
+  $('count').textContent=`${found.length}件表示 / 全${posts.length}件`;
+  const root=$('results');root.replaceChildren();
+  for(const post of found){
+    const article=document.createElement('article');article.className='result';
+    const heading=document.createElement('h3');heading.textContent=post.title;article.append(heading);
+    const preview=document.createElement('p');preview.className='preview';preview.textContent=(post.caption||post.memo||'説明文なし').slice(0,260);article.append(preview);
+    const actions=document.createElement('div');actions.className='row';
+    const link=document.createElement('a');link.className='link';link.href=post.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Instagramで開く ↗';actions.append(link);
+    const edit=document.createElement('button');edit.type='button';edit.textContent='メモを編集';edit.onclick=()=>{const value=prompt('検索用メモを入力',post.memo||'');if(value===null)return;post.memo=SaguCore.repairText(value);persist();render()};actions.append(edit);
+    article.append(actions);root.append(article);
+  }
+}
+function repairStored(showMessage=true){
+  const before=JSON.stringify(posts);posts=dedupe(posts);const changed=before!==JSON.stringify(posts);
+  if(changed)persist();render();
+  if(showMessage)setStatus(changed?'保存済みデータの文字化けを修復しました。':'保存済みデータはすでに正常です。');
+  return changed;
+}
+function loadStored(){
+  const raw=localStorage.getItem(STORAGE_KEY);if(!raw)return;
+  try{
+    const parsed=JSON.parse(raw);if(!Array.isArray(parsed))throw Error();
+    posts=parsed;const changed=repairStored(false);
+    if(changed)setStatus('ブラウザに保存済みのデータを自動修復しました。');
+  }catch{posts=[];setStatus('ブラウザの保存データを読み取れませんでした。元データは消去していません。',true)}
+}
+
+$('file').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];if(!file)return;
+  try{
+    const incoming=SaguCore.fromInstagram(JSON.parse(await file.text()));
+    const result=merge(incoming);
+    setStatus(`${result.added}件を追加、${result.updated}件を更新しました。読み取り対象は${incoming.length}件です。`);
+  }catch(error){setStatus('読み込みに失敗しました：'+(error?.message||'JSONを確認してください'),true)}
+  event.target.value='';
+});
+$('search').addEventListener('input',render);
+$('add').addEventListener('click',()=>{
+  const url=SaguCore.normalizeUrl($('url').value.trim());if(!url){alert('Instagramの投稿URLを入力してください');return}
+  const result=merge([{url,title:$('title').value.trim()||'保存した投稿',memo:$('memo').value.trim(),caption:'',date:Date.now()/1000}]);
+  alert(result.added?'保存しました':'登録済みです');
+  if(result.added){$('url').value='';$('title').value='';$('memo').value=''}
+});
+$('backup').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify(posts,null,2)],{type:'application/json;charset=utf-8'});
+  const objectUrl=URL.createObjectURL(blob),link=document.createElement('a');link.href=objectUrl;link.download='sagu_backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),5000);
+});
+$('repair').addEventListener('click',()=>repairStored(true));
+
+loadStored();render();
+</script>
+</body>
+</html>
