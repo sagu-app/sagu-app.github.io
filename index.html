@@ -20,6 +20,7 @@
     .result h3{margin:6px 0;overflow-wrap:anywhere}.preview{white-space:pre-wrap;overflow-wrap:anywhere;color:#596781;line-height:1.55;max-height:9em;overflow:hidden}
     .row{display:flex;gap:8px;flex-wrap:wrap}.meta{font-size:.8em;color:#7182a0}
     #status{color:#2856ae;overflow-wrap:anywhere;min-height:1.5em}.error{color:#a02828!important}
+    .steps{padding-left:1.4em;line-height:1.7}.steps li+li{margin-top:.45em}.notice{background:#f5f8ff;border-left:4px solid #315ed4;padding:12px 14px;border-radius:8px;line-height:1.6}
     summary{cursor:pointer;font-weight:650}code{background:#f3f5f8;padding:.1em .3em;border-radius:4px}
     a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #315ed4;outline-offset:2px}
   </style>
@@ -27,6 +28,27 @@
 <body>
 <main>
   <header><h1>🔖 Sagu</h1><small>あの保存、どこだっけ？　AI不要・端末内検索</small></header>
+
+  <section class="card">
+    <details open><summary>はじめての方へ（使い方）</summary>
+      <ol class="steps">
+        <li>Instagramの「設定」から「アカウントセンター」を開きます。</li>
+        <li>「あなたの情報とアクセス許可」→「個人データをダウンロード」へ進み、Instagramの情報を端末へ書き出します。形式は <strong>JSON</strong> を選びます。</li>
+        <li>届いたZIPファイルを展開し、中にある <code>saved_posts.json</code> を見つけます。</li>
+        <li>下の「ファイルを選択」で <code>saved_posts.json</code> を読み込みます。</li>
+        <li>検索欄に「沖縄」「筋トレ」などを入力すると、保存投稿を探せます。</li>
+      </ol>
+      <p class="notice">選んだJSONはGitHubや外部サービスへ送信されません。このブラウザの中だけで処理・保存されます。Instagramの画面名は更新により少し変わる場合があります。</p>
+      <p><a class="link" href="https://accountscenter.instagram.com/" target="_blank" rel="noopener noreferrer">Instagramアカウントセンターを開く ↗</a></p>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>友達に紹介する</h2>
+    <p class="muted">このURLを送るだけで使ってもらえます。</p>
+    <div class="row"><button id="share" type="button">URLをコピー</button><a class="link" href="https://sagu-app.github.io/">https://sagu-app.github.io/</a></div>
+    <p id="shareStatus" role="status" aria-live="polite"></p>
+  </section>
 
   <section class="card">
     <input type="search" id="search" placeholder="沖縄、筋トレ、バッグ…" aria-label="保存投稿を検索">
@@ -250,6 +272,11 @@ $('backup').addEventListener('click',()=>{
   const objectUrl=URL.createObjectURL(blob),link=document.createElement('a');link.href=objectUrl;link.download='sagu_backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),5000);
 });
 $('repair').addEventListener('click',()=>repairStored(true));
+$('share').addEventListener('click',async()=>{
+  const url='https://sagu-app.github.io/';
+  try{await navigator.clipboard.writeText(url);$('shareStatus').textContent='URLをコピーしました。友達へそのまま送れます。'}
+  catch{prompt('このURLをコピーしてください',url)}
+});
 
 loadStored();render();
 </script>
